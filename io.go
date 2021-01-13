@@ -6,11 +6,48 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 type InputMsg struct {
 	msg string
 	err error
+}
+
+func Passwd(hint string, defaultVal string) InputMsg {
+	return passwd(hint, defaultVal, "")
+}
+
+func PasswdWithMask(hint string, defaultVal string, mask string) InputMsg {
+	return passwd(hint, defaultVal, mask)
+}
+
+func passwd(hint string, defaultVal string, mask string) InputMsg {
+	var ioBuf []byte
+	if hint != "" {
+		fmt.Print(hint)
+	}
+	state, err := terminal.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return InputMsg{"", err}
+	}
+	defer terminal.Restore(0, state)
+	inputReader := bufio.NewReader(os.Stdin)
+	for {
+		b, err := inputReader.ReadByte()
+		if err != nil {
+			return InputMsg{"", err}
+		}
+		if b == 0x0d {
+			fmt.Println()
+			return InputMsg{strings.TrimSpace(string(ioBuf)), nil}
+		}
+		if mask != "" {
+			fmt.Print(mask)
+		}
+		ioBuf = append(ioBuf, b)
+	}
 }
 
 func MessageBox(hint string, defaultVal string) InputMsg {
@@ -125,27 +162,44 @@ func YesNo(hint string, defaults bool) bool {
 	}
 }
 
-func StopUntil(hint string, trigger string) error {
+func StopUntil(hint string, trigger string, repeat bool) error {
 	pressLen := len(trigger)
 	if trigger == "" {
 		pressLen = 1
 	} else {
 		pressLen = len(trigger)
 	}
-	ioBuf := make([]byte, pressLen)
+	state, err := terminal.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return err
+	}
+	defer terminal.Restore(0, state)
+	inputReader := bufio.NewReader(os.Stdin)
+	//ioBuf := make([]byte, pressLen)
+	if hint != "" && !repeat {
+		fmt.Print(hint)
+	}
+	i := 0
 	for {
-		if hint != "" {
-			fmt.Print(hint)
-		}
-		inputReader := bufio.NewReader(os.Stdin)
-		_, err := inputReader.Read(ioBuf)
+		b, err := inputReader.ReadByte()
 		if err != nil {
 			return err
 		}
-		if string(ioBuf) == trigger || trigger == "" {
+		if trigger == "" {
 			break
 		}
-		fmt.Print("\n")
+		if b == trigger[i] {
+			i++
+			if i == pressLen {
+				break
+			}
+			continue
+		}
+		i = 0
+		if hint != "" && repeat {
+			fmt.Print("\n")
+			fmt.Print(hint)
+		}
 	}
 	return nil
 }
