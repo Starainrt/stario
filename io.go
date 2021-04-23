@@ -23,30 +23,103 @@ func PasswdWithMask(hint string, defaultVal string, mask string) InputMsg {
 	return passwd(hint, defaultVal, mask)
 }
 
-func passwd(hint string, defaultVal string, mask string) InputMsg {
-	var ioBuf []byte
+func MessageBoxRaw(hint string, defaultVal string) InputMsg {
+	return messageBox(hint, defaultVal)
+}
+
+func messageBox(hint string, defaultVal string) InputMsg {
+	var ioBuf []rune
 	if hint != "" {
 		fmt.Print(hint)
 	}
-	state, err := terminal.MakeRaw(int(os.Stdin.Fd()))
+	if strings.Index(hint, "\n") >= 0 {
+		hint = strings.TrimSpace(hint[strings.LastIndex(hint, "\n"):])
+	}
+	fd := int(os.Stdin.Fd())
+	state, err := terminal.MakeRaw(fd)
 	if err != nil {
 		return InputMsg{"", err}
 	}
-	defer terminal.Restore(0, state)
+	defer fmt.Println()
+	defer terminal.Restore(fd, state)
 	inputReader := bufio.NewReader(os.Stdin)
 	for {
-		b, err := inputReader.ReadByte()
+		b, _, err := inputReader.ReadRune()
 		if err != nil {
 			return InputMsg{"", err}
 		}
 		if b == 0x0d {
-			fmt.Println()
-			return InputMsg{strings.TrimSpace(string(ioBuf)), nil}
+			strValue := strings.TrimSpace(string(ioBuf))
+			if len(strValue) == 0 {
+				strValue = defaultVal
+			}
+			return InputMsg{strValue, nil}
 		}
-		if mask != "" {
+		if b == 0x08 || b == 0x7F {
+			if len(ioBuf) > 0 {
+				ioBuf = ioBuf[:len(ioBuf)-1]
+			}
+			fmt.Print("\r")
+			for i := 0; i < len(ioBuf)+2+len(hint); i++ {
+				fmt.Print(" ")
+			}
+		} else {
+			ioBuf = append(ioBuf, b)
+		}
+		fmt.Print("\r")
+		if hint != "" {
+			fmt.Print(hint)
+		}
+		fmt.Print(string(ioBuf))
+	}
+}
+
+func passwd(hint string, defaultVal string, mask string) InputMsg {
+	var ioBuf []rune
+	if hint != "" {
+		fmt.Print(hint)
+	}
+	if strings.Index(hint, "\n") >= 0 {
+		hint = strings.TrimSpace(hint[strings.LastIndex(hint, "\n"):])
+	}
+	fd := int(os.Stdin.Fd())
+	state, err := terminal.MakeRaw(fd)
+	if err != nil {
+		return InputMsg{"", err}
+	}
+	defer fmt.Println()
+	defer terminal.Restore(fd, state)
+	inputReader := bufio.NewReader(os.Stdin)
+	for {
+		b, _, err := inputReader.ReadRune()
+		if err != nil {
+			return InputMsg{"", err}
+		}
+		if b == 0x0d {
+			strValue := strings.TrimSpace(string(ioBuf))
+			if len(strValue) == 0 {
+				strValue = defaultVal
+			}
+			return InputMsg{strValue, nil}
+		}
+		if b == 0x08 || b == 0x7F {
+			if len(ioBuf) > 0 {
+				ioBuf = ioBuf[:len(ioBuf)-1]
+			}
+			fmt.Print("\r")
+			for i := 0; i < len(ioBuf)+2+len(hint); i++ {
+				fmt.Print(" ")
+			}
+		} else {
+			ioBuf = append(ioBuf, b)
+		}
+		fmt.Print("\r")
+		if hint != "" {
+			fmt.Print(hint)
+		}
+		for i := 0; i < len(ioBuf); i++ {
 			fmt.Print(mask)
 		}
-		ioBuf = append(ioBuf, b)
 	}
 }
 
@@ -59,7 +132,11 @@ func MessageBox(hint string, defaultVal string) InputMsg {
 	if err != nil {
 		return InputMsg{"", err}
 	}
-	return InputMsg{strings.TrimSpace(str), nil}
+	str = strings.TrimSpace(str)
+	if len(str) == 0 {
+		str = defaultVal
+	}
+	return InputMsg{str, nil}
 }
 
 func (im InputMsg) String() (string, error) {
@@ -148,47 +225,46 @@ func (im InputMsg) MustFloat32() float32 {
 }
 
 func YesNo(hint string, defaults bool) bool {
-	res := strings.ToUpper(MessageBox(hint, "").MustString())
-	if res == "" {
-		return defaults
-	}
-	res = res[0:1]
-	if res == "Y" {
-		return true
-	} else if res == "N" {
-		return false
-	} else {
-		return defaults
+	for {
+		res := strings.ToUpper(MessageBox(hint, "").MustString())
+		if res == "" {
+			return defaults
+		}
+		res = res[0:1]
+		if res == "Y" {
+			return true
+		} else if res == "N" {
+			return false
+		}
 	}
 }
 
 func StopUntil(hint string, trigger string, repeat bool) error {
-	pressLen := len(trigger)
+	pressLen := len([]rune(trigger))
 	if trigger == "" {
 		pressLen = 1
-	} else {
-		pressLen = len(trigger)
 	}
-	state, err := terminal.MakeRaw(int(os.Stdin.Fd()))
+	fd := int(os.Stdin.Fd())
+	if hint != "" {
+		fmt.Print(hint)
+	}
+	state, err := terminal.MakeRaw(fd)
 	if err != nil {
 		return err
 	}
-	defer terminal.Restore(0, state)
+	defer terminal.Restore(fd, state)
 	inputReader := bufio.NewReader(os.Stdin)
 	//ioBuf := make([]byte, pressLen)
-	if hint != "" && !repeat {
-		fmt.Print(hint)
-	}
 	i := 0
 	for {
-		b, err := inputReader.ReadByte()
+		b, _, err := inputReader.ReadRune()
 		if err != nil {
 			return err
 		}
 		if trigger == "" {
 			break
 		}
-		if b == trigger[i] {
+		if b == []rune(trigger)[i] {
 			i++
 			if i == pressLen {
 				break
@@ -197,7 +273,7 @@ func StopUntil(hint string, trigger string, repeat bool) error {
 		}
 		i = 0
 		if hint != "" && repeat {
-			fmt.Print("\n")
+			fmt.Print("\r\n")
 			fmt.Print(hint)
 		}
 	}
